@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Run current file (pytorch-gpu)",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {},
+      "pythonPath": "C:/Users/nashk/.conda/envs/pytorch-gpu/python.exe"
+    },
+    {
+      "name": "Python: Run sample.py (pytorch-gpu)",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/sample.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "env": {},
+      "pythonPath": "C:/Users/nashk/.conda/envs/pytorch-gpu/python.exe"
+    }
+  ]
+}
