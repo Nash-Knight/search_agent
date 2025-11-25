@@ -137,16 +137,90 @@ python tst2.py
 
 ---
 
-**简要说明 — `tst2.py`**
+**详细说明 — `tst2.py`（实验性流式生成）**
 
-1) 目标：实现真正的流式生成（token-by-token），在模型需要外部信息时即时触发工具调用并继续生成（利用 KV cache）。
-2) 关键特点：
-   - 使用 `BitsAndBytesConfig` 做 4-bit 量化以减少显存占用。
-   - 手工按步调用模型前向，维护并复用 `past_key_values`（KV cache）。
-   - 在检测到 `<search>` 或 `<tool_response>` 标记时暂停生成，调用 `search()`（同样使用 Jina），并用二级模型（示例中使用 Aliyun Dashscope / `qwen3-max`）对检索内容进行过滤与摘要。
-3) 限制与注意事项：
-   - 代码为实验性实现，直接使用 `torch.argmax` 作为解码策略（可替换为采样策略以获得更自然文本）。
-   - 需要额外 API Key（例如 `DASHSCOPE_API_KEY`、`JINA_API`），并可能需要对 `tokenizer.apply_chat_template` 的调用兼容性进行调整。
+本节为 `tst2.py` 提供面向技术评审的详细说明，便于演示流式中断-搜索-继续生成的设计与调试要点。
+
+1) 脚本定位与目标
+
+- `tst2.py` 是一个实验性脚本，用以验证如何在低显存量化模型上实现 token-by-token 流式生成，并在检测到工具调用信号（例如 `<search>`）时中断生成、调用检索工具并将检索信息注入后续生成中，整个过程复用模型的 KV cache（`past_key_values`）以节省计算。
+
+2) 依赖与运行环境
+
+- Python 包：`transformers`, `torch`, `bitsandbytes`, `openai`, `requests`, `python-dotenv`。
+- 环境变量：
+  - `JINA_API`：Jina 查询 API token（脚本内使用 `os.getenv('JINA_API')`）。
+  - `DASHSCOPE_API_KEY`：用于调用 Aliyun Dashscope / `qwen3-max`（脚本示例中用作二级过滤）。
+- 模型路径：脚本示例使用本地量化模型路径 `model_name`（示例为 Windows 路径）。
+
+3) 关键组件与函数讲解
+
+- `bnb_config = BitsAndBytesConfig(...)`
+  - 作用：配置 4-bit 量化参数，减少显存占用使模型可在较小 GPU 上运行。
+
+- `tokenizer = AutoTokenizer.from_pretrained(model_name)` / `model = AutoModelForCausalLM.from_pretrained(...)`
+  - 加载量化后的模型与 tokenizer，注意 `from_pretrained` 的参数需要与模型文件格式一致（量化元信息、vocab 等）。
+
+- `filter(query, content)`
+  - 作用：将检索到的原始文本用二级大模型（示例使用 Aliyun Dashscope 的 `qwen3-max`）进行摘要与提取关键信息，返回包裹在 `<response>...</response>` 的摘要字符串。
+  - 实践要点：尽量限制 `content` 长度并设置合理的 prompt，引导二级模型只返回精炼结果，避免多余的解释。
+
+- `generation(query, info, round, model=model, tokenizer=tokenizer)`
+  - 作用：脚本的生成主循环，按步（每次一个 token）调用 `model(...)` 得到 logits 与 `past_key_values`，使用 `past_key_values` 复用 KV cache 来继续后续生成。
+  - 详细逻辑：
+    1. 构造 `sys_prompt`，指明何时输出 `<tool_response><search>`（严格固定字符串），避免模型以其它方式调用工具。
+    2. 使用 `tokenizer.apply_chat_template(...)` 构造 prompt（脚本中以该方法生成推理输入）。
+    3. 将 prompt 编码为张量 `inputs`，并设置 `generated = inputs['input_ids']`。
+    4. 在循环内：
+       - 调用 `outputs = model(input_ids=generated, past_key_values=past_key_values, use_cache=True)`。
+       - 从 `outputs.logits[:, -1, :]` 取出下一 token 的分布；示例中用 `torch.argmax` 作为解码策略（可替换为 `top-k`/`top-p` 采样或温度采样以避免死循环或过度确定输出）。
+       - 更新 `past_key_values = outputs.past_key_values`，并把新生成的 `next_token` 传入下一轮循环（作为 `generated`）。
+       - 实时解码并打印 `decoded = tokenizer.decode(next_token[0])`，将输出片段附加到 `full_text`。
+    5. 中断检测：
+       - 若 `tmp`（尾部缓冲区）中包含 `<search>`，脚本会调用 `search(query)` 并把返回的 `info` 拼接回 `query`，随后递归或循环进入下一轮生成（保留并复用 `past_key_values`）。
+       - 若包含结束标记 `<|im_end|>`，则终止生成并返回。
+
+- `search(query: str)`
+  - 作用：调用 Jina (`https://s.jina.ai/?q=...`) 获取检索结果，解析 JSON 中的 `data` 列表并构造 `content` 字符串传给 `filter()` 做二级处理，返回精炼后的 `filtered_content`。
+  - 实践要点：
+    - 对网络请求做超时与错误处理，避免阻塞主生成循环过久。
+    - 建议在生产中把 `search()` 改为异步实现或在单独线程中执行，以降低生成延迟并避免阻塞主线程。
+
+4) 运行示例
+
+```powershell
+# 运行脚本（需在 .env 配置 API Key）
+python tst2.py
+```
+
+脚本主入口示例中会以 `query = "查询特斯拉的实时股价"` 启动 `generation(query, info="", round=1)`。
+
+5) 调试与性能建议
+
+- 解码策略：当前使用 `torch.argmax` 非常确定性，容易导致输出重复或卡在固定 token。建议改为 `top-k/top-p` 采样或加入温度参数。示例改法：
+
+```python
+probs = torch.softmax(logits / temperature, dim=-1)
+next_token = torch.multinomial(probs, num_samples=1)
+```
+
+- KV cache 大小：`past_key_values` 会随生成长度增长，如果你多轮复用 KV cache，请注意显存增长并在合适时机清理或裁剪缓存。
+- 异步 search：把 `search()` 放到后台线程或使用 `asyncio` 可避免等待网络返回阻塞生成。主生成循环检测到触发标记后可以切换到等待状态并在后台填充 `info`。
+- 日志与采样：增加对 `decoded` 的短缓冲打印与日志记录，便于定位模型何时输出 `<search>`、`<|im_end|>` 等特殊标记。
+
+6) 安全性与鲁棒性建议
+
+- 外部请求失败：`search()` 应返回清晰的错误标识（例如 `None` 或 `{"error":"..."}`），主逻辑需处理此类错误并决定是否重试或跳过。
+- 长文本截断：对传给二级模型的 `content` 做摘要或截断，避免超长输入导致二级模型返回错误。
+
+7) 适用场景与限制
+
+- 适用场景：对实时外部信息有强需求且希望实现流式用户体验（例如聊天机器人需要边生成边检索）。
+- 限制：实现复杂度高、易受解码策略和 KV cache 管理影响；对于需要严格可解释的多轮流程，推荐使用 `search_agent.ipynb` 的标签检测方式。
+
+---
+
+如果你满意这份更详细的 `tst2.py` 说明，我会把此 TODO 标记为已完成并进行一次轻微语法校对（我不会改动 `search_agent.ipynb` 部分）。
 
 ---
 
