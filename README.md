@@ -69,9 +69,11 @@ python tst2.py
 - 系统检测到 `<search>` 标签后：调用 `fetch_search_result()` 拉取搜索结果并格式化为 `formatted_sources`；将该信息注入下一轮 prompt 并继续生成。
 - 重复上述步骤直到模型不再输出 `<search>`；将模型生成的可见内容（移除内部标签后的）作为最终答案，并列出引用来源。
 
-![Search Agent 流程图](imgs/flowchart.png)
+<div style="text-align:center">
+  <img src="imgs/flowchart.png" alt="Search Agent 流程图" style="width:40%" />
 
-*图：Search Agent 标签检测工作流（用户输入 → 模型判断是否搜索 → 调用 Jina → 整合信息 → 迭代/输出最终答案）*
+  <p style="font-style:italic; margin-top:8px;">图：Search Agent 标签检测工作流（用户输入 → 模型判断是否搜索 → 调用 Jina → 整合信息 → 迭代/输出最终答案）</p>
+</div>
 
 2) 关键函数（按 notebook 实现顺序）
 
