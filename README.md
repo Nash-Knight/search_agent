@@ -58,7 +58,7 @@ python tst2.py
 
 ---
 
-**详细说明 — `search_agent.ipynb`（面向汇报）**
+**详细说明 — `search_agent.ipynb`**
 
 本节分为三部分：整体工作流、每个重要函数的职责与实现要点、运行示例与注意事项。
 
@@ -68,6 +68,10 @@ python tst2.py
 - 使用 `BASE_PROMPT` 指导模型判断是否需要检索：若需要，模型应输出格式化标签 `<search>关键词</search>`。
 - 系统检测到 `<search>` 标签后：调用 `fetch_search_result()` 拉取搜索结果并格式化为 `formatted_sources`；将该信息注入下一轮 prompt 并继续生成。
 - 重复上述步骤直到模型不再输出 `<search>`；将模型生成的可见内容（移除内部标签后的）作为最终答案，并列出引用来源。
+
+![Search Agent 流程图](imgs/flowchart.png)
+
+*图：Search Agent 标签检测工作流（用户输入 → 模型判断是否搜索 → 调用 Jina → 整合信息 → 迭代/输出最终答案）*
 
 2) 关键函数（按 notebook 实现顺序）
 
@@ -131,7 +135,7 @@ python tst2.py
 
 ---
 
-**简要说明 — `tst2.py`（实验性，面向技术评审）**
+**简要说明 — `tst2.py`**
 
 1) 目标：实现真正的流式生成（token-by-token），在模型需要外部信息时即时触发工具调用并继续生成（利用 KV cache）。
 2) 关键特点：
