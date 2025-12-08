@@ -1,0 +1,13 @@
+conf/config*.yaml
+conf/cache.db
+*.log
+.env
+logs/
+bin/
+subconverter/
+*.zip
+*.tar.gz
+.ipynb_checkpoints/
+test_clash.sh
+CLAUDE.md
+*.pid

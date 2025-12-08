@@ -1,0 +1,21 @@
+download.sh: line 2: $'\r': command not found
+download.sh: line 5: $'\r': command not found
+download.sh: line 9: $'\r': command not found
+download.sh: line 11: $'\r': command not found
+Traceback (most recent call last):
+  File "/root/miniconda3/bin/hf", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/root/miniconda3/lib/python3.12/site-packages/huggingface_hub/cli/hf.py", line 59, in main
+    service.run()
+  File "/root/miniconda3/lib/python3.12/site-packages/huggingface_hub/cli/download.py", line 136, in run
+    print(self._download())  # Print path to downloaded files
+          ^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/lib/python3.12/site-packages/huggingface_hub/cli/download.py", line 169, in _download
+    return snapshot_download(
+           ^^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 106, in _inner_fn
+    validate_repo_id(arg_value)
+  File "/root/miniconda3/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 160, in validate_repo_id
+    raise HFValidationError(
+huggingface_hub.errors.HFValidationError: Repo id must use alphanumeric chars, '-', '_' or '.'. The name cannot start or end with '-' or '.' and the maximum length is 96: 'Qwen/Qwen3-8B'.

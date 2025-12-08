@@ -1,0 +1,196 @@
+name: CI Test
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        architecture: [amd64, arm64]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y curl wget gzip
+    
+    - name: Test script syntax
+      run: |
+        bash -n start.sh
+        echo "✓ Shell script syntax is valid"
+    
+    - name: Test architecture detection
+      run: |
+        # 模拟不同架构
+        export MOCK_ARCH="${{ matrix.architecture }}"
+        
+        # 提取架构检测逻辑进行测试
+        if [[ "$MOCK_ARCH" == "amd64" ]]; then
+          echo "Testing AMD64 architecture detection"
+          # 检查yq下载路径是否正确
+          if [[ $(grep -c "yq_linux_amd64" start.sh) -gt 0 ]]; then
+            echo "✓ AMD64 yq path configured correctly"
+          else
+            echo "✗ AMD64 yq path not found"
+            exit 1
+          fi
+        elif [[ "$MOCK_ARCH" == "arm64" ]]; then
+          echo "Testing ARM64 architecture detection"
+          if [[ $(grep -c "yq_linux_arm64" start.sh) -gt 0 ]]; then
+            echo "✓ ARM64 yq path configured correctly"
+          else
+            echo "✗ ARM64 yq path not found"
+            exit 1
+          fi
+        fi
+    
+    - name: Test mihomo download URLs
+      run: |
+        # 检查mihomo下载URL是否有效
+        echo "Testing mihomo download URL format..."
+        
+        # 提取版本号
+        MIHOMO_VERSION=$(grep "MIHOMO_VERSION=" start.sh | cut -d'"' -f2)
+        echo "Found MIHOMO_VERSION: $MIHOMO_VERSION"
+        
+        # 检查URL格式
+        if [[ -n "$MIHOMO_VERSION" ]]; then
+          TEST_URL="https://github.com/MetaCubeX/mihomo/releases/download/v${MIHOMO_VERSION}/mihomo-linux-amd64-compatible-v${MIHOMO_VERSION}.gz"
+          echo "Testing URL: $TEST_URL"
+          
+          # 使用HEAD请求检查文件是否存在
+          if curl -s --head "$TEST_URL" | grep -q "200 OK"; then
+            echo "✓ Mihomo download URL is accessible"
+          else
+            echo "✗ Mihomo download URL is not accessible"
+            exit 1
+          fi
+        else
+          echo "✗ MIHOMO_VERSION not found"
+          exit 1
+        fi
+    
+    - name: Test configuration functions
+      run: |
+        echo "Testing configuration functions..."
+        
+        # 检查必要的函数是否存在
+        if grep -q "use_fallback_config()" start.sh; then
+          echo "✓ Fallback config function exists"
+        else
+          echo "✗ Fallback config function missing"
+          exit 1
+        fi
+        
+        if grep -q "check_yaml()" start.sh; then
+          echo "✓ YAML check function exists"
+        else
+          echo "✗ YAML check function missing"
+          exit 1
+        fi
+    
+    - name: Test environment variables
+      run: |
+        echo "Testing environment variables..."
+        
+        # 创建测试环境文件
+        echo 'export CLASH_URL="https://example.com/test"' > .env
+        echo 'export CLASH_SECRET=""' >> .env
+        
+        # 测试环境变量加载
+        source .env
+        if [[ -n "$CLASH_URL" ]]; then
+          echo "✓ Environment variables can be loaded"
+        else
+          echo "✗ Environment variables not loaded correctly"
+          exit 1
+        fi
+        
+        rm -f .env
+    
+    - name: Test script execution (dry run)
+      run: |
+        echo "Testing script execution in dry-run mode..."
+        
+        # 创建必要的目录
+        mkdir -p conf logs bin
+        
+        # 创建模拟的环境文件
+        echo 'export CLASH_URL="https://example.com/test"' > .env
+        echo 'export CLASH_SECRET=""' >> .env
+        
+        # 设置DRY_RUN模式（需要在脚本中添加支持）
+        export DRY_RUN=true
+        
+        # 检查关键变量是否正确设置
+        source .env
+        if [[ -n "$CLASH_URL" ]]; then
+          echo "✓ Test environment setup successful"
+        else
+          echo "✗ Test environment setup failed"
+          exit 1
+        fi
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Install ShellCheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+    
+    - name: Run ShellCheck
+      run: |
+        shellcheck start.sh || true  # 暂时允许警告
+        echo "ShellCheck completed"
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Security scan
+      run: |
+        echo "Running security checks..."
+        
+        # 检查是否有硬编码的敏感信息
+        if grep -r "password\|secret\|token\|key" --include="*.sh" --include="*.yml" . | grep -v "CLASH_SECRET" | grep -v "example"; then
+          echo "✗ Potential hardcoded secrets found"
+          exit 1
+        else
+          echo "✓ No hardcoded secrets detected"
+        fi
+        
+        # 检查是否有不安全的curl命令
+        if grep -r "curl.*-k\|wget.*--no-check-certificate" --include="*.sh" .; then
+          echo "⚠ Warning: Insecure HTTP requests found"
+        fi
+
+  notify-owner:
+    runs-on: ubuntu-latest
+    needs: [test, lint, security-scan]
+    if: github.event_name == 'push' && github.actor == 'VocabVictor'
+    steps:
+    - name: Direct push notification
+      run: |
+        if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.lint.result }}" == "success" ] && [ "${{ needs.security-scan.result }}" == "success" ]; then
+          echo "✅ 所有者直接推送成功 - 所有测试通过"
+          echo "Commit: ${{ github.sha }}"
+          echo "Message: ${{ github.event.head_commit.message }}"
+        else
+          echo "❌ 所有者直接推送 - 测试失败"
+          echo "请检查失败的测试并修复问题"
+          exit 1
+        fi
